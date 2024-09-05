@@ -1,0 +1,17 @@
+name: demo
+
+topology:
+  nodes:
+    srl:
+      kind: nokia_srlinux
+      image: ghcr.io/nokia/srlinux:24.3.3
+      ports:
+        - "2202:22"
+    ceos:
+      kind: arista_ceos
+      image: ceos:4.32.1F
+      ports:
+        - "2201:22"
+
+  links:
+    - endpoints: ["srl:e1-1", "ceos:eth1"]

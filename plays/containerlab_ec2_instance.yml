@@ -1,0 +1,142 @@
+---
+- name: Manage EC2 instance for containerlab
+  hosts: localhost
+  gather_facts: no
+  vars_files:
+    - ../secrets/aws_credentials.yml  # Reference the encrypted AWS credentials file
+
+  vars:
+    aws_region: "{{ aws_region }}"
+    instance_name: "containerlab"
+    ami_id: "ami-003932de22c285676"  # ubuntu 22.04
+    instance_type: "t2.xlarge"  # need at least vCPU*2 and 16g memory
+    key_name: "rogerxwu"  # Replace with your EC2 keypair name
+
+  tasks:
+    - name: Gather EC2 instance information based on Name tag
+      amazon.aws.ec2_instance_info:
+        aws_access_key: "{{ aws_access_key }}"
+        aws_secret_key: "{{ aws_secret_key }}"
+        region: "{{ aws_region }}"
+        filters:
+          "tag:Name": "{{ instance_name }}"
+      register: ec2_info
+      tags:
+        - always
+
+    - name: Check if the EC2 instance exists
+      set_fact:
+        instance_exists: "{{ ec2_info.instances | length > 0 }}"
+      tags:
+        - always
+
+    - name: Print instance information if it exists
+      when: instance_exists
+      debug:
+        msg: "Instance {{ ec2_info.instances[0].instance_id }} is of type {{ ec2_info.instances[0].instance_type }} and is in state {{ ec2_info.instances[0].state.name }}."
+      tags:
+        - always
+
+    - name: Print instance information if it not exists
+      when: not instance_exists
+      debug:
+        msg: "Instance containerlab is not existing."
+      tags:
+        - always
+
+    - name: Start the EC2 instance
+      when: instance_exists
+      amazon.aws.ec2_instance:
+        aws_access_key: "{{ aws_access_key }}"
+        aws_secret_key: "{{ aws_secret_key }}"
+        region: "{{ aws_region }}"
+        filters:
+          "tag:Name": "{{ instance_name }}"
+        state: started
+      tags: 
+        - start
+        - never
+
+    - name: Create EC2 instance if containerlab does not exist
+      when: not instance_exists
+      amazon.aws.ec2_instance:
+        aws_access_key: "{{ aws_access_key }}"
+        aws_secret_key: "{{ aws_secret_key }}"
+        region: "{{ aws_region }}"
+        key_name: "{{ key_name }}"
+        instance_type: "{{ instance_type }}"
+        security_group: default
+        network:
+          assign_public_ip: true
+        image_id: "{{ ami_id }}"
+        wait: yes
+        count: 1
+        instance_tags:
+          Name: "{{ instance_name }}"
+      register: new_instance
+      tags: 
+        - start
+        - never
+
+    - name: Print new instance details if created
+      when: not instance_exists
+      debug:
+        msg: "Created new instance with ID: {{ new_instance.instances[0].id }} in state: {{ new_instance.instances[0].state }}."
+      tags: 
+        - start
+        - never
+
+    - name: Verify EC2 instance is running
+      amazon.aws.ec2_instance_info:
+        aws_access_key: "{{ aws_access_key }}"
+        aws_secret_key: "{{ aws_secret_key }}"
+        region: "{{ aws_region }}"
+        filters:
+          "tag:Name": "{{ instance_name }}"
+      register: verify_started
+      tags: 
+        - start
+        - never
+
+    - name: Confirm the instance is in 'running' state
+      when: verify_started.instances[0].state.name == "running"
+      debug:
+        msg: "Instance {{ verify_started.instances[0].instance_id }} is successfully running, the public ip is {{ verify_started.instances[0].public_ip_address }}."
+      tags: 
+        - start
+        - never
+
+    - name: Stop the EC2 instance
+      when: instance_exists
+      amazon.aws.ec2_instance:
+        aws_access_key: "{{ aws_access_key }}"
+        aws_secret_key: "{{ aws_secret_key }}"
+        region: "{{ aws_region }}"
+        filters:
+          "tag:Name": "{{ instance_name }}"
+        state: stopped
+      register: stopped_instance
+      tags: 
+        - stop
+        - never
+
+    - name: Verify EC2 instance is stopped after stop tag
+      when: stopped_instance is defined
+      amazon.aws.ec2_instance_info:
+        aws_access_key: "{{ aws_access_key }}"
+        aws_secret_key: "{{ aws_secret_key }}"
+        region: "{{ aws_region }}"
+        filters:
+          "tag:Name": "{{ instance_name }}"
+      register: verify_stopped
+      tags: 
+        - stop
+        - never
+
+    - name: Confirm the instance is in 'stopped' state
+      when: instance_exists and verify_stopped.instances[0].state.name == "stopped"
+      debug:
+        msg: "Instance {{ verify_stopped.instances[0].instance_id }} is successfully stopped."
+      tags: 
+        - stop
+        - never
